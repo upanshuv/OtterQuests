@@ -16,10 +16,10 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.x/tabler-icons.min.css">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow:hidden;background:var(--bg,#fff)}
-
-body{display:flex;flex-direction:column;background:var(--bg,#fff);}
-#app{display:flex;flex-direction:column;height:100%;width:100%;background:var(--bg,#fff);position:relative;overflow:hidden}
+html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+html,body{background:var(--bg,#1b1b1d)!important;min-height:100%;}
+body{display:flex;flex-direction:column;background:var(--bg,#f0f0f0)!important;}
+#app{display:flex;flex-direction:column;height:100%;max-width:430px;margin:0 auto;background:var(--bg,#f0f0f0)!important;position:relative;overflow:hidden;box-shadow:0 0 40px rgba(0,0,0,.12)}
 #screen{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
 #tabbar{display:flex;border-top:0.5px solid var(--border,rgba(0,0,0,.08));background:var(--sf,#F5F5F5);padding-bottom:max(env(safe-area-inset-bottom),8px);flex-shrink:0}
 .tab-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0 4px;background:none;border:none;cursor:pointer;color:var(--st,#7A7A7E);font-size:10px;font-family:inherit}
@@ -107,13 +107,12 @@ button{cursor:pointer;font-family:inherit}
 .avatar{width:38px;height:38px;border-radius:50%;background:var(--ac,#7C5CBF);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0}
 
 /* ── RESPONSIVE LAYOUT ─────────────────────────── */
-/* Phone: true full screen */
+/* Phone (default): full screen, bottom nav */
 html,body{height:100%;overflow:hidden}
-#sidebar{display:none !important}
-/* Tablet ≥640px: centred card floating on grey */
+/* Tablet ≥640px: centered card */
 @media(min-width:640px){
-  #app{max-width:430px;width:430px;border-radius:28px;height:min(calc(100vh - 48px),900px);box-shadow:0 8px 40px rgba(0,0,0,.22)}
-  body{align-items:center;justify-content:center}
+  body{align-items:center;justify-content:center;background:#e8e8e8}
+  #app{max-width:480px;border-radius:28px;height:calc(100vh - 48px);max-height:900px;box-shadow:0 8px 40px rgba(0,0,0,.18)}
 }
 /* Desktop ≥1080px: sidebar + content */
 @media(min-width:1080px){
@@ -129,7 +128,6 @@ html,body{height:100%;overflow:hidden}
   .sidebar-btn:hover{background:rgba(0,0,0,.05)}
   .sidebar-btn.active{background:rgba(124,92,191,.1);color:var(--ac,#7C5CBF)}
   .sidebar-btn i{font-size:20px;width:24px}
-  #sidebar{display:flex !important}
   .sidebar-spacer{flex:1}
   .sidebar-user{display:flex;align-items:center;gap:8px;padding:12px;background:var(--bg,#fff);border-radius:12px;margin-top:8px;cursor:pointer}
   .sidebar-user-info{flex:1;min-width:0}
@@ -170,8 +168,9 @@ html,body{height:100%;overflow:hidden}
     <button class="tab-btn" id="tb-shop" onclick="switchTab('shop')"><i class="ti ti-shopping-cart"></i>Shop</button>
     <button class="tab-btn" id="tb-profile" onclick="switchTab('profile')"><i class="ti ti-user-circle"></i>Profile</button>
   </div>
-  <div id="ov" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:flex-end" id="ov">
-    <div id="sheet-body" class="sheet"></div>
+  <div id="ov" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:flex-end;background:var(--overlay,rgba(0,0,0,.45))">
+    <div style="position:absolute;inset:0" onclick="closeSheet()"></div>
+    <div id="sheet-body" class="sheet" onclick="event.stopPropagation()"></div>
   </div>
 </div>
 
@@ -268,8 +267,8 @@ let selectedDate  = todayKey();
 let profileView   = 'main';     // main | groupDetail
 let selGroupCode  = null;
 let shopCat       = 'theme';
-let groupListeners= {};         // code -> unsubscribe fn (group doc)
-let groupQuestListeners={};     // code -> unsubscribe fn (group quests)
+let groupListeners= {};         // code -> unsubscribe fn
+let groupQuestListeners={};     // code -> unsubscribe fn for quest subcollection
 
 let S = {
   quests:[], groups:[], rocks:0, totalXP:0, xpToday:0, lastXPDate:'',
@@ -341,7 +340,7 @@ async function saveProfile(){
 
 // ─── FIRESTORE: QUESTS ─────────────────────────────────────────────────────────
 // Personal quests → users/{uid}/quests/{id}
-// Group quests    → groups/{code}/quests/{id}  (shared across all members)
+// Group quests    → groups/{code}/quests/{id}  ← shared across all members
 
 async function fsAddQuest(quest){
   if(!currentUser) return;
@@ -352,13 +351,10 @@ async function fsAddQuest(quest){
       await setDoc(doc(db,'users',currentUser.uid,'quests',quest.id), quest);
     }
   } catch(e){
-    console.error('fsAddQuest error:', e.code, e.message);
-    if(e.code==='permission-denied'){
-      showToast('⚠️ Firestore rules are blocking group quests. Update rules in Firebase console — see firestore.rules file.');
-    }
+    console.error('fsAddQuest failed:', e.code, e.message);
+    if(e.code==='permission-denied') showToast('⚠️ Firestore rules are blocking group quests. Paste firestore.rules into Firebase console → Firestore → Rules → Publish.');
   }
 }
-
 async function fsUpdateQuest(quest){
   if(!currentUser) return;
   try {
@@ -368,21 +364,21 @@ async function fsUpdateQuest(quest){
       await setDoc(doc(db,'users',currentUser.uid,'quests',quest.id), quest);
     }
   } catch(e){
-    console.error('fsUpdateQuest error:', e.code, e.message);
-    if(e.code==='permission-denied'){
-      showToast('⚠️ Firebase rules are blocking this. Update Firestore rules in Firebase console.');
-    }
+    console.error('fsUpdateQuest failed:', e.code, e.message);
+    if(e.code==='permission-denied') showToast('⚠️ Firestore permission denied. Update rules in Firebase console.');
   }
 }
-
-async function fsDeleteQuest(questId){
+// NOTE: groupId is passed in directly — do NOT look it up from S.quests here
+// because deleteQuest removes from S.quests BEFORE calling this function
+async function fsDeleteQuest(questId, groupId){
   if(!currentUser) return;
-  const quest = S.quests.find(q=>q.id===questId);
-  if(quest && quest.groupId){
-    await deleteDoc(doc(db,'groups',quest.groupId,'quests',questId));
-  } else {
-    await deleteDoc(doc(db,'users',currentUser.uid,'quests',questId));
-  }
+  try {
+    if(groupId){
+      await deleteDoc(doc(db,'groups',groupId,'quests',questId));
+    } else {
+      await deleteDoc(doc(db,'users',currentUser.uid,'quests',questId));
+    }
+  } catch(e){ console.error('fsDeleteQuest failed:', e.code, e.message); }
 }
 
 // ─── FIRESTORE: GROUPS ───────────────────────────────────────────────────────
@@ -414,7 +410,7 @@ async function fsJoinGroup(code){
   return localGroup;
 }
 function listenToGroup(code){
-  // ── Listen to the group doc (name, members, leaderboard points) ──
+  // Listen to group doc (members + leaderboard points)
   if(!groupListeners[code]){
     const unsub=onSnapshot(doc(db,'groups',code),snap=>{
       if(!snap.exists()) return;
@@ -429,37 +425,34 @@ function listenToGroup(code){
     });
     groupListeners[code]=unsub;
   }
-
-  // ── Listen to the group's quests collection (shared across all members) ──
+  // Listen to group quests subcollection — real-time sync across all members
   if(!groupQuestListeners[code]){
-    const unsub=onSnapshot(collection(db,'groups',code,'quests'),snapshot=>{
-      // Remove all quests that belong to this group from local state
-      S.quests=S.quests.filter(q=>q.groupId!==code);
-      // Add fresh from Firestore — this is the real-time magic
-      snapshot.forEach(d=>{
-        S.quests.push({...d.data(),id:d.id});
-      });
-      render();
-    }, err=>{
-      console.error('group quest listener error:', err.code, err.message);
-      if(err.code==='permission-denied'){
-        showToast('⚠️ Firebase rules are blocking group quests. Paste the rules from firestore.rules into Firebase console → Firestore → Rules.');
+    const unsub=onSnapshot(
+      collection(db,'groups',code,'quests'),
+      snapshot=>{
+        // Replace all quests for this group with fresh data from Firestore
+        S.quests=S.quests.filter(q=>q.groupId!==code);
+        snapshot.forEach(d=>S.quests.push({...d.data(),id:d.id}));
+        render();
+      },
+      err=>{
+        console.error('group quest listener error:', err.code, err.message);
+        if(err.code==='permission-denied'){
+          showToast('⚠️ Firestore rules are blocking group quests. Paste firestore.rules into Firebase console → Firestore → Rules → Publish.');
+        }
       }
-    });
+    );
     groupQuestListeners[code]=unsub;
   }
 }
 async function addGroupPoint(code){
   if(!currentUser||!code) return;
   try {
-    // Only award to the person who checked it off — read current value then increment
     const snap=await getDoc(doc(db,'groups',code));
     if(!snap.exists()) return;
     const data=snap.data();
     const cur=(data.members[currentUser.uid]?.points||0)+1;
-    await updateDoc(doc(db,'groups',code),{
-      [`members.${currentUser.uid}.points`]:cur
-    });
+    await updateDoc(doc(db,'groups',code),{[`members.${currentUser.uid}.points`]:cur});
   } catch(e){console.warn('group point failed',e);}
 }
 
@@ -477,7 +470,6 @@ async function loadUserData(uid){
     // Load groups the user is in
     const codes=d.groupCodes||[];
     S.groups=[];
-    // Load group metadata first (no quest listeners yet)
     for(const code of codes){
       const gSnap=await getDoc(doc(db,'groups',code));
       if(gSnap.exists()){
@@ -486,13 +478,11 @@ async function loadUserData(uid){
       }
     }
   }
-  // Load personal quests first so snapshot listeners can safely append on top
+  // Load personal quests FIRST — group quest listeners append on top of this
   const questsSnap=await getDocs(collection(db,'users',uid,'quests'));
   S.quests=questsSnap.docs.map(d=>({...d.data(),id:d.id}));
-  // NOW start real-time group listeners — they will append group quests to S.quests
-  for(const group of S.groups){
-    listenToGroup(group.code);
-  }
+  // NOW start real-time group listeners so they don't get overwritten
+  for(const group of S.groups){ listenToGroup(group.code); }
 }
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
@@ -604,52 +594,32 @@ window.toggleQuest=function(id){
   if(t.isDone){
     const today=todayKey();
     if(S.lastXPDate!==today){S.xpToday=0;S.lastXPDate=today;}
-
     if(t.groupId){
-      // GROUP QUEST: only the person who checks it off gets group points.
-      // No rocks or XP from group quests — group points are a separate currency.
-      // Record who completed it so other devices show it as done.
-      t.completedBy = currentUser.uid;
-      t.completedByName = currentUser.displayName || currentUser.email.split('@')[0];
-      // Only award group points once, only to the checker
+      // GROUP QUEST — only the person checking it off gets group points
+      // No personal rocks or XP for group quests
+      t.completedBy=currentUser.uid;
+      t.completedByName=currentUser.displayName||currentUser.email.split('@')[0];
       if(!t.groupPointsClaimed){
-        t.groupPointsClaimed = true;
+        t.groupPointsClaimed=true;
         addGroupPoint(t.groupId);
       }
     } else {
-      // PERSONAL QUEST: XP + rocks as before
+      // PERSONAL QUEST — XP + rocks as normal
       if(!t.xpClaimed&&S.xpToday<10){t.xpClaimed=true;S.xpToday++;S.totalXP++;}
       const onTime=!t.time||(new Date()<=timeDate(t.date,t.time));
-      if(!t.rewardClaimed&&onTime){
-        t.rewardClaimed=true; S.rocks++;
-      }
+      if(!t.rewardClaimed&&onTime){t.rewardClaimed=true;S.rocks++;}
     }
   } else {
-    // Un-checking a group quest — clear the completedBy info
-    if(t.groupId){
-      t.completedBy = null;
-      t.completedByName = null;
-    }
+    if(t.groupId){t.completedBy=null;t.completedByName=null;}
   }
   fsUpdateQuest(t); queueProfileSave(); render();
 };
 window.deleteQuest=function(id){
-  // CRITICAL: find the quest BEFORE filtering it out, so we know its groupId
-  const quest = S.quests.find(q=>q.id===id);
-  const groupId = quest ? quest.groupId : null;
-  // Remove locally for instant UI response
-  S.quests = S.quests.filter(x=>x.id!==id);
-  // Delete from correct Firestore path using the groupId we captured above
-  if(groupId){
-    // Group quest → delete from groups/{code}/quests/{id}
-    // This fires onSnapshot on ALL members → quest disappears from everyone's screen
-    deleteDoc(doc(db,'groups',groupId,'quests',id))
-      .catch(e=>console.error('group quest delete failed:',e));
-  } else {
-    // Personal quest → delete from users/{uid}/quests/{id}
-    deleteDoc(doc(db,'users',currentUser.uid,'quests',id))
-      .catch(e=>console.error('personal quest delete failed:',e));
-  }
+  // Capture groupId BEFORE removing from array — after filter it's gone
+  const quest=S.quests.find(q=>q.id===id);
+  const groupId=quest?quest.groupId:null;
+  S.quests=S.quests.filter(x=>x.id!==id);
+  fsDeleteQuest(id, groupId);  // pass groupId directly
   render();
 };
 function timeDate(dk,ts){const[h,m]=ts.split(':').map(Number);const d=parseDate(dk);d.setHours(h,m,0,0);return d;}
@@ -746,28 +716,22 @@ window.shiftMonth=function(n){const d=parseDate(selectedDate);d.setMonth(d.getMo
 
 // ─── SHEET UTIL ───────────────────────────────────────────────────────────────
 function showToast(msg){
-  let t=document.getElementById('toast');
-  if(!t){t=document.createElement('div');t.id='toast';
-    t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 18px;border-radius:20px;font-size:13px;z-index:999;max-width:90%;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.3)';
-    document.getElementById('app').appendChild(t);}
+  let t=document.getElementById('_toast');
+  if(!t){
+    t=document.createElement('div');
+    t.id='_toast';
+    t.style.cssText='position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#D64545;color:#fff;padding:10px 18px;border-radius:20px;font-size:13px;z-index:9999;max-width:88%;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.35);display:none';
+    document.body.appendChild(t);
+  }
   t.textContent=msg; t.style.display='block';
-  clearTimeout(t._timer);
-  t._timer=setTimeout(()=>t.style.display='none',5000);
+  clearTimeout(t._t); t._t=setTimeout(()=>t.style.display='none',7000);
 }
-
 function showSheet(html){
   const ov=document.getElementById('ov');
-  const body=document.getElementById('sheet-body');
-  body.innerHTML=html;
+  document.getElementById('sheet-body').innerHTML=html;
   ov.style.display='flex';
-  // Only close when clicking the dark backdrop — NOT the sheet itself
-  ov.onclick=function(e){ if(e.target===ov) closeSheet(); };
 }
-window.closeSheet=function(){
-  const ov=document.getElementById('ov');
-  ov.style.display='none';
-  ov.onclick=null;
-};
+window.closeSheet=function(){document.getElementById('ov').style.display='none';};
 
 // ─── RENDER ───────────────────────────────────────────────────────────────────
 function render(){
@@ -885,10 +849,9 @@ function buildQuestRow(tk){
         ${tk.time?`<span style="font-size:11px;color:${t.st};display:flex;align-items:center;gap:3px">${tk.notify?'<i class="ti ti-bell" style="font-size:10px"></i>':''} ${tk.time}</span>`:''}
         ${tk.category?`<span class="cat-pill">${esc(tk.category)}</span>`:''}
         ${g?`<span style="font-size:11px;color:${t.ac};display:flex;align-items:center;gap:3px"><i class="ti ti-users" style="font-size:10px"></i>${esc(g.name)}</span>`:''}
-        ${tk.isDone&&tk.completedByName?`<span style="font-size:10px;color:${t.st}">✓ ${esc(tk.completedByName)}</span>`:''}
       </div>
     </div>
-    ${!tk.groupId||tk.createdBy===currentUser?.uid?`<button onclick="event.stopPropagation();deleteQuest('${tk.id}')" style="background:rgba(214,69,69,.12);border:none;border-radius:8px;color:#D64545;font-size:13px;font-weight:600;padding:6px 10px;align-self:center;flex-shrink:0;display:flex;align-items:center;gap:3px"><i class="ti ti-trash" style="font-size:15px"></i>Del</button>`:''}
+    <button onclick="event.stopPropagation();deleteQuest('${tk.id}')" style="background:none;border:none;color:${t.st};font-size:18px;padding:4px;align-self:center"><i class="ti ti-trash"></i></button>
   </div>`;
 }
 
