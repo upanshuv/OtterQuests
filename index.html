@@ -107,19 +107,23 @@ button{cursor:pointer;font-family:inherit}
 .avatar{width:38px;height:38px;border-radius:50%;background:var(--ac,#7C5CBF);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0}
 
 /* ── RESPONSIVE LAYOUT ─────────────────────────── */
-/* Phone (default): full screen, bottom nav */
-html,body{height:100%;overflow:hidden}
-/* Tablet ≥640px: centered card */
-@media(min-width:640px){
-  body{align-items:center;justify-content:center;background:#e8e8e8}
-  #app{max-width:480px;border-radius:28px;height:calc(100vh - 48px);max-height:900px;box-shadow:0 8px 40px rgba(0,0,0,.18)}
+/* DEFAULT (mobile): true full screen, no card, no sidebar */
+html,body{height:100%;overflow:hidden;background:var(--bg,#fff)}
+#sidebar{display:none}
+#app{width:100%;border-radius:0;box-shadow:none}
+
+/* Tablet ≥768px: centred card */
+@media(min-width:768px){
+  body{align-items:center;justify-content:center;background:var(--bg,#fff) !important}
+  #app{max-width:430px;width:430px;border-radius:28px;height:min(calc(100vh - 48px),900px);box-shadow:0 8px 40px rgba(0,0,0,.18)}
 }
 /* Desktop ≥1080px: sidebar + content */
 @media(min-width:1080px){
-  body{flex-direction:row;align-items:stretch;justify-content:center;gap:0}
-  #sidebar{display:flex!important;flex-direction:column;width:230px;background:var(--sf,#F5F5F5);border-right:0.5px solid var(--border,rgba(0,0,0,.08));padding:28px 16px 24px;flex-shrink:0;gap:4px}
+  body{flex-direction:row;align-items:stretch;justify-content:center;background:var(--bg,#fff) !important}
   #app{width:480px;max-width:480px;border-radius:0;height:100vh;max-height:100vh;box-shadow:none}
   #tabbar{display:none!important}
+  /* Sidebar shown ONLY on desktop AND only when body has .logged-in class */
+  body.logged-in #sidebar{display:flex;flex-direction:column;width:230px;background:var(--sf,#F5F5F5);border-right:0.5px solid var(--border,rgba(0,0,0,.08));padding:28px 16px 24px;flex-shrink:0;gap:4px}
   .sidebar-logo{display:flex;align-items:center;gap:10px;padding:0 8px 24px;border-bottom:0.5px solid var(--border,rgba(0,0,0,.08));margin-bottom:8px}
   .sidebar-logo-icon{width:40px;height:40px;border-radius:12px;background:var(--ac,#7C5CBF);display:flex;align-items:center;justify-content:center;flex-shrink:0}
   .sidebar-logo-icon i{font-size:20px;color:#fff}
@@ -134,16 +138,16 @@ html,body{height:100%;overflow:hidden}
   .sidebar-user-name{font-size:13px;font-weight:600;color:var(--tx,#1C1C1E);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sidebar-user-email{font-size:11px;color:var(--st,#7A7A7E);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
-/* Large monitor ≥1400px: wider content */
+/* Large monitor ≥1400px */
 @media(min-width:1400px){
-  #sidebar{width:260px}
+  body.logged-in #sidebar{width:260px}
   #app{width:540px;max-width:540px}
 }
 </style>
 </head>
 <body>
 <!-- Desktop sidebar (hidden on mobile via CSS) -->
-<div id="sidebar" style="display:none">
+<div id="sidebar">
   <div class="sidebar-logo">
     <div class="sidebar-logo-icon"><i class="ti ti-checklist"></i></div>
     <span class="sidebar-logo-name">OtterQuests</span>
@@ -504,12 +508,12 @@ onAuthStateChanged(auth, async user=>{
     authMode='app';
     applyTheme();
     document.getElementById('tabbar').style.display='flex';
-    document.getElementById('sidebar').style.display='flex';
+    document.body.classList.add('logged-in');
   } else {
     currentUser=null;
     authMode='auth';
     document.getElementById('tabbar').style.display='none';
-    document.getElementById('sidebar').style.display='none';
+    document.body.classList.remove('logged-in');
     Object.values(groupListeners).forEach(u=>u());
     groupListeners={};
   }
