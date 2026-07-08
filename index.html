@@ -353,7 +353,19 @@ async function fsAddQuest(quest){
     if(quest.groupId){
       console.log('[sync] writing group quest → groups/'+quest.groupId+'/quests/'+quest.id, quest);
       await setDoc(doc(db,'groups',quest.groupId,'quests',quest.id), quest);
-      console.log('[sync] ✔ server confirmed the write for quest', quest.id);
+      // Read it straight back from the server to PROVE it landed in the shared
+      // group path with the right groupId — not just trust the write silently.
+      const verify=await getDoc(doc(db,'groups',quest.groupId,'quests',quest.id));
+      if(!verify.exists()){
+        console.error('[sync] ✘ wrote the quest but could not read it back at groups/'+quest.groupId+'/quests/'+quest.id);
+        return {ok:false,error:'write-not-verified'};
+      }
+      const savedGroupId=verify.data().groupId;
+      console.log('[sync] ✔ verified on server: quest', quest.id, 'is stored under group', quest.groupId, '— saved groupId field =', savedGroupId);
+      if(savedGroupId!==quest.groupId){
+        console.error('[sync] ✘ groupId field mismatch! expected', quest.groupId, 'got', savedGroupId);
+        return {ok:false,error:'groupid-mismatch'};
+      }
     } else {
       await setDoc(doc(db,'users',currentUser.uid,'quests',quest.id), quest);
     }
@@ -682,8 +694,12 @@ window.confirmAdd=async function(){
     return; // keep the sheet open so nothing is lost and the user sees the error
   }
 
-  // Write CONFIRMED by the server — safe to show locally now.
+  // Write CONFIRMED (and read back) by the server — safe to show locally now.
   S.quests.push(quest);
+  if(quest.groupId){
+    const g=S.groups.find(x=>x.code===quest.groupId);
+    showToastSuccess(`✅ Saved to group "${g?g.name:quest.groupId}" — every member will see it.`);
+  }
   if(quest.notify&&quest.time&&'Notification' in window&&Notification.permission==='granted'){
     const delay=timeDate(quest.date,quest.time).getTime()-Date.now();
     if(delay>0) setTimeout(()=>{if(S.quests.find(t=>t.id===quest.id&&!t.isDone)) new Notification('Quest due',{body:quest.title,icon:'icon-192.png'});},delay);
@@ -759,8 +775,21 @@ function showToast(msg){
     t.style.cssText='position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#D64545;color:#fff;padding:10px 18px;border-radius:20px;font-size:13px;z-index:9999;max-width:88%;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.35);display:none';
     document.body.appendChild(t);
   }
+  t.style.background='#D64545';
   t.textContent=msg; t.style.display='block';
   clearTimeout(t._t); t._t=setTimeout(()=>t.style.display='none',7000);
+}
+function showToastSuccess(msg){
+  let t=document.getElementById('_toast');
+  if(!t){
+    t=document.createElement('div');
+    t.id='_toast';
+    t.style.cssText='position:fixed;bottom:90px;left:50%;transform:translateX(-50%);color:#fff;padding:10px 18px;border-radius:20px;font-size:13px;z-index:9999;max-width:88%;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.35);display:none';
+    document.body.appendChild(t);
+  }
+  t.style.background='#3AA65B';
+  t.textContent=msg; t.style.display='block';
+  clearTimeout(t._t); t._t=setTimeout(()=>t.style.display='none',5000);
 }
 function showSheet(html){
   const ov=document.getElementById('ov');
