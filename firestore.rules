@@ -1,0 +1,22 @@
+// IMPORTANT: paste this into Firebase Console → Firestore → Rules tab → click Publish
+// Without this, group quest reads/writes will be silently blocked.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      match /quests/{questId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    match /groups/{code} {
+      allow read, write: if request.auth != null;
+      match /quests/{questId} {
+        allow read, write: if request.auth != null;
+      }
+    }
+  }
+}
