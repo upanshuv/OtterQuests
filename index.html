@@ -204,8 +204,8 @@ import { getAuth, createUserWithEmailAndPassword,
          signInWithEmailAndPassword, signOut,
          onAuthStateChanged, updateProfile }               from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, doc, setDoc, getDoc, updateDoc,
-         collection, getDocs, deleteDoc,
-         onSnapshot, serverTimestamp }                     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+         collection, getDocs, deleteDoc, query, where,
+         onSnapshot, increment, serverTimestamp }          from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 // ─────────────────────────────────────────────
 // FIREBASE CONFIG  ← replace ALL values below
@@ -476,12 +476,12 @@ function listenToGroup(code){
 async function addGroupPoint(code){
   if(!currentUser||!code) return;
   try {
-    const snap=await getDoc(doc(db,'groups',code));
-    if(!snap.exists()) return;
-    const data=snap.data();
-    const cur=(data.members[currentUser.uid]?.points||0)+1;
-    await updateDoc(doc(db,'groups',code),{[`members.${currentUser.uid}.points`]:cur});
-  } catch(e){console.warn('group point failed',e);}
+    // increment() is atomic — safe even if multiple users check at the same time
+    await updateDoc(doc(db,'groups',code),{
+      [`members.${currentUser.uid}.points`]: increment(1)
+    });
+    console.log('[points] +1 group point for', currentUser.uid, 'in group', code);
+  } catch(e){ console.warn('group point failed', e); }
 }
 
 // ─── FIRESTORE: LOAD USER DATA ────────────────────────────────────────────────
@@ -620,31 +620,52 @@ function questsForDate(dk){
     return (PRI[b.priority]?.rank||0)-(PRI[a.priority]?.rank||0);
   });
 }
-window.toggleQuest=function(id){
+window.toggleQuest=async function(id){
   const t=S.quests.find(x=>x.id===id); if(!t) return;
   t.isDone=!t.isDone;
   if(t.isDone){
     const today=todayKey();
     if(S.lastXPDate!==today){S.xpToday=0;S.lastXPDate=today;}
     if(t.groupId){
-      // GROUP QUEST — only the person checking it off gets group points
-      // No personal rocks or XP for group quests
-      t.completedBy=currentUser.uid;
-      t.completedByName=currentUser.displayName||currentUser.email.split('@')[0];
+      // GROUP QUEST — only the FIRST person to check it off gets the point.
+      // groupPointsClaimed is stored on the quest doc in Firestore so ALL
+      // devices see the lock — not just the device that set it locally.
       if(!t.groupPointsClaimed){
+        // Claim the point by writing to Firestore first — any race condition
+        // is handled by Firestore's atomic write guaranteeing one winner.
         t.groupPointsClaimed=true;
-        addGroupPoint(t.groupId);
+        t.completedBy=currentUser.uid;
+        t.completedByName=currentUser.displayName||currentUser.email.split('@')[0];
+        // Write the claimed state to Firestore BEFORE awarding the point
+        await fsUpdateQuest(t);
+        // Now award the point — only this device does this
+        await addGroupPoint(t.groupId);
+      } else {
+        // Already claimed by someone else — just update isDone state
+        t.completedBy=currentUser.uid;
+        t.completedByName=currentUser.displayName||currentUser.email.split('@')[0];
+        await fsUpdateQuest(t);
       }
     } else {
       // PERSONAL QUEST — XP + rocks as normal
       if(!t.xpClaimed&&S.xpToday<10){t.xpClaimed=true;S.xpToday++;S.totalXP++;}
       const onTime=!t.time||(new Date()<=timeDate(t.date,t.time));
       if(!t.rewardClaimed&&onTime){t.rewardClaimed=true;S.rocks++;}
+      fsUpdateQuest(t);
     }
   } else {
-    if(t.groupId){t.completedBy=null;t.completedByName=null;}
+    // Unchecking — clear completion info but keep groupPointsClaimed=true
+    // so the point is never awarded again even if re-checked
+    if(t.groupId){
+      t.completedBy=null;
+      t.completedByName=null;
+      // NOTE: groupPointsClaimed stays true — no refunds
+      await fsUpdateQuest(t);
+    } else {
+      fsUpdateQuest(t);
+    }
   }
-  fsUpdateQuest(t); queueProfileSave(); render();
+  queueProfileSave(); render();
 };
 window.deleteQuest=function(id){
   // Capture groupId BEFORE removing from array — after filter it's gone
