@@ -647,11 +647,35 @@ window.toggleQuest=async function(id){
         await fsUpdateQuest(t);
       }
     } else {
-      // PERSONAL QUEST — XP + rocks as normal
-      if(!t.xpClaimed&&S.xpToday<10){t.xpClaimed=true;S.xpToday++;S.totalXP++;}
-      const onTime=!t.time||(new Date()<=timeDate(t.date,t.time));
-      if(!t.rewardClaimed&&onTime){t.rewardClaimed=true;S.rocks++;}
-      fsUpdateQuest(t);
+      // PERSONAL QUEST — award rocks + XP exactly once, using the same
+      // Firestore-first pattern as group quests so it survives page refreshes.
+      let earnedRock = false;
+      let earnedXP = false;
+
+      if(!t.rewardClaimed){
+        const onTime=!t.time||(new Date()<=timeDate(t.date,t.time));
+        if(onTime){
+          t.rewardClaimed=true;
+          earnedRock=true;
+        }
+      }
+      if(!t.xpClaimed && S.xpToday<10){
+        t.xpClaimed=true;
+        earnedXP=true;
+      }
+
+      // Write the claimed flags to Firestore FIRST — same as group quests
+      await fsUpdateQuest(t);
+
+      // Now update the counts atomically
+      if(earnedRock || earnedXP){
+        const updates={};
+        if(earnedRock){ updates.rocks=increment(1); S.rocks++; }
+        if(earnedXP){ updates.totalXP=increment(1); updates.xpToday=increment(1); S.totalXP++; S.xpToday++; }
+        try {
+          await updateDoc(doc(db,'users',currentUser.uid), updates);
+        } catch(e){ console.warn('personal reward update failed', e); }
+      }
     }
   } else {
     // Unchecking — clear completion info but keep groupPointsClaimed=true
