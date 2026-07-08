@@ -1062,7 +1062,14 @@ function buildJoinSheet(){
 function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
 
 // ─── SERVICE WORKER ──────────────────────────────────────────────────────────
-if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(()=>{});
+// A self-destructing service worker (see sw.js) is registered once to clean up
+// any old cached version still running on a device. It removes itself, so
+// after this runs once, no service worker will be active on that device again.
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg=>{
+    reg.update(); // force an immediate check instead of waiting for the browser's own schedule
+  }).catch(()=>{});
+}
 </script>
 </body>
 </html>
