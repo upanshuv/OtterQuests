@@ -454,6 +454,13 @@ function listenToGroup(code){
         // Replace all quests for this group with fresh data from Firestore
         S.quests=S.quests.filter(q=>q.groupId!==code);
         snapshot.forEach(d=>S.quests.push({...d.data(),id:d.id}));
+        // Safety net: never allow two entries with the same id to coexist,
+        // no matter how they got there.
+        const seen=new Set();
+        S.quests=S.quests.filter(q=>{
+          if(seen.has(q.id)) return false;
+          seen.add(q.id); return true;
+        });
         S.groupSyncError=null;
         render();
       },
@@ -701,10 +708,15 @@ window.confirmAdd=async function(){
   }
 
   // Write CONFIRMED (and read back) by the server — safe to show locally now.
-  S.quests.push(quest);
   if(quest.groupId){
+    // Do NOT push here — this device is also subscribed to this group's
+    // real-time listener (listenToGroup), which will add this exact quest
+    // itself as soon as the snapshot arrives. Pushing it here too caused a
+    // duplicate row that only showed up on the creating device.
     const g=S.groups.find(x=>x.code===quest.groupId);
     showToastSuccess(`✅ Saved to group "${g?g.name:quest.groupId}" — every member will see it.`);
+  } else {
+    S.quests.push(quest);
   }
   if(quest.notify&&quest.time&&'Notification' in window&&Notification.permission==='granted'){
     const delay=timeDate(quest.date,quest.time).getTime()-Date.now();
