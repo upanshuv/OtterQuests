@@ -278,6 +278,7 @@ let S = {
   quests:[], groups:[], rocks:0, totalXP:0, xpToday:0, lastXPDate:'',
   ownedThemes:['white','cream','dark'], ownedIcons:['check'],
   equippedTheme:'white', equippedIcon:'check',
+  groupSyncError:null,
 };
 
 // ─── DATE HELPERS ─────────────────────────────────────────────────────────────
@@ -347,16 +348,19 @@ async function saveProfile(){
 // Group quests    → groups/{code}/quests/{id}  ← shared across all members
 
 async function fsAddQuest(quest){
-  if(!currentUser) return;
+  if(!currentUser) return {ok:false,error:'not-signed-in'};
   try {
     if(quest.groupId){
+      console.log('[sync] writing group quest → groups/'+quest.groupId+'/quests/'+quest.id, quest);
       await setDoc(doc(db,'groups',quest.groupId,'quests',quest.id), quest);
+      console.log('[sync] ✔ server confirmed the write for quest', quest.id);
     } else {
       await setDoc(doc(db,'users',currentUser.uid,'quests',quest.id), quest);
     }
+    return {ok:true};
   } catch(e){
     console.error('fsAddQuest failed:', e.code, e.message);
-    if(e.code==='permission-denied') showToast('⚠️ Firestore rules are blocking group quests. Paste firestore.rules into Firebase console → Firestore → Rules → Publish.');
+    return {ok:false,error:e.code||e.message||'unknown-error'};
   }
 }
 async function fsUpdateQuest(quest){
@@ -434,16 +438,17 @@ function listenToGroup(code){
     const unsub=onSnapshot(
       collection(db,'groups',code,'quests'),
       snapshot=>{
+        console.log('[sync] group quest listener fired for '+code+' — '+snapshot.size+' quest(s) from server');
         // Replace all quests for this group with fresh data from Firestore
         S.quests=S.quests.filter(q=>q.groupId!==code);
         snapshot.forEach(d=>S.quests.push({...d.data(),id:d.id}));
+        S.groupSyncError=null;
         render();
       },
       err=>{
         console.error('group quest listener error:', err.code, err.message);
-        if(err.code==='permission-denied'){
-          showToast('⚠️ Firestore rules are blocking group quests. Paste firestore.rules into Firebase console → Firestore → Rules → Publish.');
-        }
+        S.groupSyncError=`Can't sync group "${code}": ${err.code||err.message}. This device cannot read shared quests until this is fixed.`;
+        render();
       }
     );
     groupQuestListeners[code]=unsub;
@@ -473,12 +478,16 @@ async function loadUserData(uid){
     S.equippedIcon=d.equippedIcon||'check';
     // Load groups the user is in
     const codes=d.groupCodes||[];
+    console.log('[sync] this device sees groupCodes for uid '+uid+':', codes);
     S.groups=[];
     for(const code of codes){
       const gSnap=await getDoc(doc(db,'groups',code));
       if(gSnap.exists()){
         const gd=gSnap.data();
+        console.log('[sync] loaded group', code, '— members:', Object.keys(gd.members||{}));
         S.groups.push({id:gd.id,name:gd.name,code,points:gd.members[uid]?.points||0,members:gd.members});
+      } else {
+        console.warn('[sync] group code', code, 'is in this user\'s groupCodes but the group document does not exist!');
       }
     }
   }
@@ -650,8 +659,31 @@ window.confirmAdd=async function(){
     rewardClaimed:false,xpClaimed:false,
     groupPointsClaimed:false,
     completedBy:null,completedByName:null};
+
+  const btn=document.querySelector('#sheet-body .btn-primary');
+  if(btn){btn.disabled=true;btn.textContent=quest.groupId?'Saving to group…':'Adding…';}
+
+  const result=await fsAddQuest(quest);
+
+  if(!result.ok){
+    // Write failed — do NOT show it locally, that would be lying to the user.
+    console.error('[sync] quest add FAILED, not shown locally:', result.error);
+    const body=document.getElementById('sheet-body');
+    if(body){
+      const errBox=document.createElement('div');
+      errBox.style.cssText='background:#FFF0F0;border:1px solid #D64545;border-radius:10px;padding:12px;margin-top:10px;font-size:13px;color:#D64545;line-height:1.5';
+      errBox.innerHTML=`<b>Quest was NOT saved.</b><br>Error: ${esc(result.error)}<br><br>`+
+        (result.error==='permission-denied'
+          ? 'Your Firestore Rules are blocking this write. Go to Firebase console → Firestore Database → Rules, paste the contents of firestore.rules, and click <b>Publish</b>. (Editing the local file does nothing until you Publish it there.)'
+          : 'Check your internet connection and try again. If this keeps happening, check the browser console (F12) for the full error.');
+      body.appendChild(errBox);
+    }
+    if(btn){btn.disabled=false;btn.textContent='Add Quest';}
+    return; // keep the sheet open so nothing is lost and the user sees the error
+  }
+
+  // Write CONFIRMED by the server — safe to show locally now.
   S.quests.push(quest);
-  await fsAddQuest(quest);
   if(quest.notify&&quest.time&&'Notification' in window&&Notification.permission==='granted'){
     const delay=timeDate(quest.date,quest.time).getTime()-Date.now();
     if(delay>0) setTimeout(()=>{if(S.quests.find(t=>t.id===quest.id&&!t.isDone)) new Notification('Quest due',{body:quest.title,icon:'icon-192.png'});},delay);
@@ -783,7 +815,8 @@ function buildList(){
   const t=th(), quests=questsForDate(selectedDate);
   const calNav=calMode==='day'?buildDayNav():calMode==='week'?buildWeekNav():buildMonthNav();
   const questRows=quests.length?quests.map(buildQuestRow).join(''):`<div class="empty-state"><i class="ti ti-checklist"></i>Nothing here — add a quest!</div>`;
-  return `<div class="nav-bar">
+  const syncBanner=S.groupSyncError?`<div style="background:#FFF0F0;border:1px solid #D64545;border-radius:10px;padding:10px 12px;margin:0 16px 10px;font-size:12px;color:#D64545;line-height:1.5">⚠️ ${esc(S.groupSyncError)}</div>`:'';
+  return `${syncBanner}<div class="nav-bar">
     <div style="width:60px"></div>
     <span class="nav-title">List</span>
     <div class="badge"><i class="ti ti-circle-filled" style="font-size:12px;color:#8B5E34"></i>${S.rocks}</div>
@@ -877,7 +910,7 @@ function buildAddSheet(){
     </select></div>
   ${S.groups.length?`<div class="form-group"><label class="form-label">Group (optional)</label>
     <select id="di-g" onchange="draft.groupId=this.value">
-      <option value="">None</option>${S.groups.map(g=>`<option value="${g.code}">${esc(g.name)}</option>`).join('')}
+      <option value="" ${!draft.groupId?'selected':''}>None</option>${S.groups.map(g=>`<option value="${g.code}" ${draft.groupId===g.code?'selected':''}>${esc(g.name)}</option>`).join('')}
     </select></div>`:''}
   <div class="toggle-row" onclick="toggleDraftTime()"><span>Set a time</span>
     <div class="tog ${draft.hasTime?'on':''}"><div class="tog-thumb"></div></div></div>
